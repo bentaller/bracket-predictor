@@ -1,405 +1,3 @@
-
-
-Weekly dashboard metrics
-These tasks run locally and aren't synced across devices
-
-
-Searched 3 patterns, read a file
-Searched 3 patterns, read a file
-Good. Now I have everything I need. The fix is straightforward — update addFFSlot to use teamA/scoreA and teamB/scoreB instead of winner/loser. Since ff1 = matchup(EAST.winner, SOUTH.winner, ...), teamA is always the East representative and teamB is always the South representative, preserving consistent ordering.
-
-
-Edited a file
-Edited a file
-Now let me do a quick sanity check on a few other things — the align-items: stretch fix and the dead r32slots removal — to confirm those edits landed cleanly:
-
-
-Searched code
-Searched code
-All three fixes are confirmed. Let me do a final check on the matchup function to confirm it returns teamA/scoreA as expected:
-
-
-Searched code
-Searched code
-Everything is clean. All three fixes are in place:
-
-align-items: stretch on .bracket-wrap — center FF panel stretches to full height ✓
-Dead r32slots code removed ✓
-matchup() returns teamA/teamB/scoreA/scoreB ✓
-addFFSlot uses teamA/teamB — East always top, South always bottom regardless of winner ✓
-The app is ready. View your bracket
-
-Open it in a browser, hit Generate Bracket, and adjust the sliders to weight stats to your preference. A few things to try:
-
-Crank Upset Factor to ~7–8 to watch chaos unfold
-Hover any team slot for the composite score breakdown tooltip
-UPSET badges appear on genuine seed-based upsets
-Bracket
-Code · HTML 
-
-
-Firefox
-
-A few minor aesthetic changes: 
-* the UPSET badges often truncate the team name too much. Shorten it to U or * to visually flag it
-* The team name boxes should be a bit wider - I have plenty of screen real estate to work with horizontally
-* remove the percentage from the composite score on the tooltip (97.3% becomes 97.3)
-* the tooltip bars for the sub scores look weird being different lengths. 
-
-Functional issues:
-* when Upset Factor is 0 (completely deterministic), generating the bracket with the same settings should not change the result, correct?
-* Prairie View just beat Lehigh for the 16 seed (though it probably won't make much of a difference in outcomes)
-
-Show more
-
-Thought process
-Thought process
-Let me read the relevant sections of the file to handle all of these precisely.
-
-
-Read a file, searched code
-Read a file, searched code
-Let me check the team data for Lehigh/Prairie View and the R64 column width:
-
-
-Searched 3 patterns, read 3 files, ran 3 commands
-Searched 3 patterns, read 3 files, ran 3 commands
-I can see the build_bracket.py still has old code — the fixes were made directly to bracket.html. I notice the r32slots dead code is also still present in bracket.html (lines 657-659 per that read). I need to verify the actual current state of bracket.html, then apply all the changes in one clean Python script that regenerates it properly. Let me check what the actual bracket.html looks like now:
-
-
-Check current state of all fixes in bracket.html
-Check current state of all fixes in bracket.html
-Good — all fixes confirmed in place. Now I'll make all 6 changes in one clean Python pass:
-
-
-Apply all 6 changes to bracket.html
-Apply all 6 changes to bracket.html
-Two things didn't land — let me find the exact formatting used:
-
-
-Ran 3 commands
-Ran 3 commands
-Now let me do a final full verification pass:
-
-
-Ran 3 commands
-Ran 3 commands
-The bar is correct — style="width:${pct}%" is valid CSS (the % is the CSS unit, not displayed text). My check had the wrong quote style. All changes are actually in place. Let me confirm:
-
-
-Verify composite bar and label
-Verify composite bar and label
-All 6 changes are cleanly in place. View your updated bracket
-
-Here's a summary of what changed:
-
-Aesthetic:
-
-Upset flag is now a compact * in orange (no more truncation)
-Slot widths increased: R64→148px, R32→120px, S16/E8→104px — names have more room to breathe
-Composite score tooltip shows 97.3 instead of 97.3%
-Tooltip sub-score bars are now uniform width — labels have a fixed 76px min-width and values a fixed 30px, so the bar area is always the same regardless of label length
-Functional:
-
-Factor = 0 is now fully deterministic — uses direct score comparison (>=) instead of Math.random(), so the same settings will always produce the same bracket
-Prairie View replaces Lehigh in the South 16-seed slot, with their actual Barttorvik stats (adjoe 101.4, adjde 111.3, barthag 0.256) and tournament momentum (2.6, 8-1 recent record)
-Bracket
-Code · HTML 
-
-
-Firefox
-
-I'd like it to differentiate between a seed upset (lower seed wins) and a composite score upset (lower score wins due to upset factor). Maybe a "U" for seed and "*" for composite score upset?
-
-
-Thought process
-Thought process
-Good distinction. There are actually four possible states: neither, seed only (U), score only (), or both (U). Let me trace through all the relevant code sections before editing:
-
-
-Ran 2 commands
-Ran 2 commands
-All clean. View updated bracket
-
-The four possible states a winner slot can now show:
-
-Badges	Meaning
-(none)	Favored by both seed and composite score
-U (orange)	Seed upset — lower-seeded team won, but it was the stat-favored team (e.g., a legitimately good 10-seed beats an overrated 7-seed)
-* (blue)	Score upset — the composite-favored team won the seed matchup, but the randomness factor flipped it anyway
-U* (both)	True chaos — lower-seeded and lower-scored team won
-The blue * matching the Chaos Level slider color felt like the right call — it visually ties the randomness to where you set it.
-
-Bracket
-Code · HTML 
-
-
-Firefox
-
-The chaos factor seems a bit too strong (at level 2, I'm getting multiple matchups with composite score of 135 beating 85 and 47 beating 87). Explain how you could dial it back a bit.
-
-
-Thought process
-Thought process
-The core of the issue is the shape of the k-curve, not just the constant. Let me walk through the math.
-
-Current formula: k = 20 / (1 + 11.35 × f/10)
-
-At factor=2, k drops to 6.1. Plugging that into the sigmoid for representative matchups:
-
-Composite delta	P(stronger wins) at k=6.1	Upset rate
-0.40 (e.g., 87 vs 47)	92%	8%
-0.25 (typical 5v12)	79%	21%
-0.10 (e.g., 65 vs 55)	62%	38%
-Across 63 games, even the 8% rate produces multiple visible upsets — and most games have smaller deltas than 0.40. The problem is that the current linear denominator spends the chaos budget too evenly. Factor=2 isn't "a little chaos," it's already 45% of the way from deterministic to maximum chaos.
-
-Three ways to dial it back:
-
-Option A — Exponential decay (best fit)
-
-k = 20 × (1.62/20)^(f/10)
-Same endpoints (k=20 at f=0, k=1.62 at f=10), but the curve is steep at low values. At f=2, k≈12.1 — that same 87-vs-47 matchup is now 98% for the stronger team. You'd need to push to f=5–6 before upsets feel common.
-
-Option B — Raise the minimum k Keep the linear formula but limit the chaos ceiling. E.g., set k_min=3 instead of 1.62:
-
-k = 20 / (1 + 5.67 × f/10)   → k=3.0 at f=10
-This makes factor=10 more like "moderate chaos" rather than "a 5-seed wins only 60%." Simpler formula, but you lose the wild end of the slider.
-
-Option C — Shift the "chaos onset" point Keep the same formula structure but reduce the 11.35 constant to ~4–5, so chaos ramps up much more slowly. Factor=2 becomes k≈9, and factor=10 only reaches k≈3.3. This preserves the linear shape but compresses the effective range.
-
-My recommendation is Option A. The exponential form is the cleanest — low factors stay near-deterministic (a small-delta game at f=2 would be 85%+ for the favorite), mid-range (f=5–6) produces the occasional surprise, and f=10 is still genuinely chaotic. It also maps more intuitively to user expectation: "2 out of 10" should feel like 20% of maximum chaos, not 45%.
-
-One note on the "135 beating 85" matchup — those numbers are too high to be composite scores (which are 0–100). You're likely looking at the raw AdjOE stat in the tooltip stats section (offensive efficiency, which runs ~95–135). If a team with AdjOE 135 is losing, it just means their composite score was lower after accounting for defense, height, and other factors — which is working as intended.
-
-Want me to implement Option A?
-
-I like Option A. (and it was a 35 beating an 85, not a 135). Go ahead an implement that.
-
-
-Edited 2 files, searched code, read a file
-Edited 2 files, searched code, read a file
-Done. View updated bracket
-
-For reference, the k values at each factor setting now:
-
-Factor	Old k	New k	35-vs-85 upset rate
-2	6.1	12.1	8% → 1.5%
-4	3.5	7.3	18% → 6%
-6	2.4	4.4	29% → 14%
-8	1.9	2.7	36% → 24%
-10	1.6	1.6	40% → 40%
-The endpoints are identical — factor=0 is still fully deterministic, factor=10 still gives the same maximum chaos. The change is purely in how quickly chaos ramps up. At factor=2 you should now rarely see a 35 beat an 85; that kind of result shouldn't show up until factor=6 or so.
-
-Bracket
-Code · HTML 
-
-
-Firefox
-
-Final change: SMU lost to Miami-OH in the play-in game.
-
-
-Ran 4 commands, read a file, edited a file
-Ran 4 commands, read a file, edited a file
-Done. View updated bracket
-
-Miami-OH replaces SMU in the Midwest 11-seed slot with their actual stats. Worth noting they're a meaningful downgrade — SMU had a barthag of 0.86 (top-25 caliber), while Miami-OH sits at 0.72, which is more in line with an 11-seed that had to survive a play-in. They also now have momentum data (3.1, 5-1 recent record) where SMU had none.
-
-Bracket
-Code · HTML 
-
-
-Firefox
-
-It's not clear who wins each game, especially the winners of the final 4 who play in the championship. Bold the winner of each game. 
-The light vertical lines in the R64 are nice to illustrate the bracket matchups - have them in each of the rounds. The right side of the bracket should have the lines on the left side of the matchups (the R64 lines are currently on the right). 
-Add a small key under the Generate button to explain the U vs * denotation.
-
-
-Thought process
-Thought process
-Let me read the key sections before writing the replacement script:
-
-
-Read 3 files, searched code
-Read 3 files, searched code
-Good, I have everything I need. Now applying all three changes in one script:
-
-
-Apply winner bolding, bracket connector lines, and upset key to bracket.html
-Apply winner bolding, bracket connector lines, and upset key to bracket.html
-All 16 checks pass. View updated bracket
-
-Here's what changed:
-
-Winner bolding — In R64, the advancing team is bold while the eliminated team stays light. In the Final Four center panel, the team moving to the championship is bold. R32/S16/E8 slots are all bold since they're all winners by definition.
-
-Connector lines — All rounds now show bracket-arm lines. Left-side bracket (East/South) has them on the right edge of each pair, pointing inward toward the next round. Right-side bracket (West/Midwest) has them on the left edge, mirrored. The R64 behavior is unchanged for the right side and now consistent with the other rounds.
-
-Upset key — Sits directly under the Generate button: U in orange (lower seed won) and * in blue (chaos factor overcame the composite score), matching the badge colors on the bracket itself.
-
-Bracket
-Code · HTML 
-
-
-Firefox
-
-The bolding should be the winner of each matchup. Like if Duke and TCU meet in the R32 and Duke wins, only Duke should be bolded in the R32. Then if Kansas beats them in the S16, Kansas would be bolded in the S16 and Duke would be unbolded. 
-You can also increase the width of the bracket to add a little more space around the F4 and Champ. And right align the WEST and MIDWEST headers.
-
-
-Thought process
-Thought process
-Let me read the current state of the relevant sections:
-
-
-Read 2 files, ran a command
-Read 2 files, ran a command
-All 10 checks pass. View updated bracket
-
-Here's what changed:
-
-Winner bolding — Now correctly reflects the matchup result at each stage. In R32, the two teams in a pair are the winners of their R64 games — only the one who wins their R32 game is bolded. That same logic carries through S16 (only the S16 winner is bold) and E8 (only the team advancing to the Final Four is bold). In the Final Four center panel, only the team advancing to the championship is bold.
-
-FF/Champ column width — Center panel increased from 96px to 120px, giving the Final Four and Championship slots more breathing room.
-
-West/Midwest headers — Right-aligned so they read flush with the right edge of their respective regions, mirroring how East/South align left.
-
-Bracket
-Code · HTML 
-
-
-Firefox
-
-That's perfect - that's the final product. 
-If I wanted to add it to a Google Site or some way of hosting it, what is the simplest way to do that?
-
-
-Thought process
-Thought process
-Good timing on that question — Google Sites is actually the one catch here. It strips JavaScript from embedded HTML for security reasons, so the interactive bracket wouldn't work if hosted directly there.
-
-The simplest paths for a working deployment:
-
-Netlify Drop (fastest, no account needed initially) Go to netlify.com/drop, drag bracket.html onto the page, and you get a live public URL in about 10 seconds. Free tier gives you a persistent URL if you create an account; without one it expires after a few hours.
-
-GitHub Pages (best if you want it permanent and shareable) Create a free GitHub repo, upload bracket.html as index.html, go to Settings → Pages → set source to main branch. You get a URL like yourusername.github.io/reponame. Takes about 5 minutes. No command line needed — the GitHub web UI handles everything.
-
-If you specifically need Google Sites: host the file on either of the above first, then in Google Sites insert an "Embed" block with the URL. Google Sites does allow iframes to external URLs — it's only direct HTML/JS paste that it blocks. The bracket will render inside the site as an embedded panel, though you may want to size the iframe tall enough to show the full bracket (the app uses 100vh so you'd want at least 700-800px height).
-
-For a one-off bracket to share with colleagues, Netlify Drop is the path of least resistance. GitHub Pages is the better choice if you want a stable URL you can bookmark and share repeatedly across the tournament.
-
-I'm realizing with the bolding that the U and * indicators would be better shown in the matchup than in the result. So if Siena beats Duke, it would show in the R64, not the R32.
-
-
-Thought process
-Thought process
-That's the right instinct — the badge marks an event (this game was an upset), so it should live at the game site where both participants are visible, not travel forward with the winner. Right now R64 shows no badges and R32/S16/E8 show the previous round's upsets on the winner. Flipping it means each column shows its own round's upsets.
-
-
-Read a file
-Read a file
-Clear picture. Three places to change — the upset flags currently carry the previous round's result forward; each needs to show the current round's result on the winner.
-
-
-Edited 3 files
-Edited 3 files
-View updated bracket
-
-The logic is now consistent across all rounds: wherever two teams are shown side by side in a pair, the winner of that game gets the badge if that game was an upset. So a 12-seed upsetting a 5-seed in R64 shows in the R64 pair, not carried into R32. If the 12-seed then pulls another upset in R32, that shows in the R32 pair. The badge marks the game, not the team's history.
-
-Bracket
-Code · HTML 
-
-
-Firefox
-
-Can you make the width of the bracket responsive to the screen? It should have a minimum width, but expand for wider screens to fill the full width.
-
-
-Read 2 files, ran a command
-Read 2 files, ran a command
-All 11 checks pass. View updated bracket
-
-The bracket now fills the full available width at any screen size. The mechanics:
-
-The two region sides each have flex: 1 and grow equally, so the bracket stays symmetric
-Each column type (R64, R32, S16, E8) has a flex-grow value proportional to its minimum width (148/120/104/104), so the columns expand at the same ratio they started — R64 always stays the widest, E8 the narrowest
-The round-header labels use the same proportional flex-grow values, so they stay precisely aligned with the columns below them as the window resizes
-The Final Four center panel stays fixed at 120px since it only needs to hold 4 short team slots
-If the window is very narrow (<~1080px), the columns stop shrinking at their minimum widths and the bracket scrolls horizontally
-Bracket
-Code · HTML 
-
-
-Firefox
-
-The scrolling doesn't work when the window is too small. The brackets keep their widths but start to overlap. Explain how you'll fix the problem before changing the code.
-
-
-Thought process
-Thought process
-The overlap happens because of two interacting issues:
-
-Root cause 1 — min-width: 0 on .side When I made the layout responsive, I added min-width: 0 to .side — a common flexbox pattern to allow items to shrink. But this lets the flex algorithm shrink each side panel below the natural minimum width of its column content. The columns inside (with flex-shrink: 0 and min-width: 148px etc.) refuse to shrink, so they overflow within their .side container and start visually overlapping adjacent elements.
-
-Root cause 2 — .bracket-wrap has no minimum width When I made the layout responsive I removed the min-width from .bracket-wrap. Without it, the flex layout happily accommodates the shrunken sides — .bracket-wrap itself never overflows .bracket-area, so .bracket-area's overflow: auto never has reason to add a scrollbar. The columns are overflowing inside .side, invisibly to the scroll trigger.
-
-The fix — two changes:
-
-Remove min-width: 0 from .side, restoring the default min-width: auto. This tells the flex algorithm that .side shouldn't shrink below its content's natural minimum width.
-Restore a min-width on .bracket-wrap equal to the sum of all column minimums + center + gaps (~1080px). This is the hard floor — when the viewport is narrower than that, .bracket-wrap overflows .bracket-area and the scrollbar correctly kicks in.
-The responsive expansion is unaffected because flex: 1 on .side and flex-grow on the columns still drive growth on wide screens. The changes only correct the narrow-screen behavior.
-
-Want me to go ahead?
-
-I alsao want to switch the green highlighting in the bracket after the R64. I like the blue highlighting at the final four, but the green doesn't fit. What would look good?
-
-
-Thought process
-Thought process
-The current green works for the South region label but clashes with East/West/Midwest, and the warm off-white aesthetic generally. Since you like the FF blue, the cleanest option is a muted slate-blue for R32–E8 winners that creates a visible hierarchy:
-
-Regular slot (R64 loser): white / #ddd border — no distinction
-Winner slot (R32–E8): light blue-gray tint — "advancing"
-Final Four slot: the current medium blue — "deep run"
-Championship: gold — unique
-Concretely: background 
-#f2f6fa, border 
-#c4d7e8, text 
-#3a6880. That's the same blue family as FF but noticeably lighter and more muted, so the progression reads naturally without the two levels looking identical.
-
-Alternative if you want something more neutral: a warm gray (
-#f5f3f1 bg, #ccc border, #555 text) — less color, more minimal. That's valid too but loses the visual progression toward blue.
-
-I'll go with the slate-blue and also apply the scroll fix at the same time:
-
-
-Changed seed text color from green to blue in bracket.html
-Changed seed text color from green to blue in bracket.html
-View updated bracket
-
-Both changes in one shot. The scroll fix: min-width: 1080px goes back on .bracket-wrap so .bracket-area's scrollbar triggers correctly on narrow screens, and min-width: 0 is removed from .side so the sides resist shrinking below their natural content minimum rather than collapsing and letting columns overlap.
-
-The color progression now reads clearly left to right — plain white for the R64 losers, muted slate-blue for advancing winners, the existing medium blue for Final Four, and gold for the champion.
-
-Bracket
-Code · HTML 
-
-
-Firefox
-
-
-
-
-
-
-Claude is AI and can make mistakes. Please double-check responses.
-Bracket · HTML
-
-
-Firefox
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -417,7 +15,7 @@ body {
   flex-direction: column;
   overflow: hidden;
 }
- 
+
 /* ── Topbar ── */
 .topbar {
   background: #fff;
@@ -430,10 +28,10 @@ body {
 }
 .topbar h1 { font-size: 16px; font-weight: 700; color: #222; letter-spacing: 0.5px; text-transform: uppercase; }
 .topbar .sub { font-size: 11px; color: #aaa; }
- 
+
 /* ── App body ── */
 .app-body { display: flex; flex: 1; overflow: hidden; }
- 
+
 /* ── Sidebar ── */
 .sidebar {
   width: 228px;
@@ -494,7 +92,7 @@ input[type=range].blue::-webkit-slider-thumb { border-color: #2e6da4; }
 }
 .upset-note strong { color: #2e6da4; display: block; font-size: 9px; letter-spacing: 0.5px; margin-bottom: 2px; }
 hr.div { border: none; border-top: 1px solid #eee; margin: 2px 0 8px; }
- 
+
 .gen-btn {
   width: 100%;
   background: #e05c29;
@@ -515,10 +113,10 @@ hr.div { border: none; border-top: 1px solid #eee; margin: 2px 0 8px; }
 .upset-key .kb { font-size: 9px; font-weight: 700; line-height: 1; min-width: 10px; text-align: center; }
 .upset-key .kb.ks { color: #e05c29; }
 .upset-key .kb.kc { color: #2e6da4; }
- 
+
 /* ── Bracket area ── */
 .bracket-area { flex: 1; overflow: auto; padding: 14px 18px 20px; }
- 
+
 /* ── Round headers ── */
 .round-headers {
   display: flex;
@@ -536,11 +134,11 @@ hr.div { border: none; border-top: 1px solid #eee; margin: 2px 0 8px; }
   padding: 2px 0;
   flex-shrink: 0;
 }
- 
+
 /* ── Bracket wrapper ── */
 .bracket-wrap { display: flex; gap: 2px; align-items: stretch; min-width: 1080px; }
 .side { display: flex; flex-direction: column; gap: 12px; flex: 1; }
- 
+
 /* ── Region ── */
 .region-wrap { flex-shrink: 0; width: 100%; }
 .rg {
@@ -553,17 +151,17 @@ hr.div { border: none; border-top: 1px solid #eee; margin: 2px 0 8px; }
 .rg.west    { color: #c07a2e; }
 .rg.midwest { color: #8a6aaa; }
 .rg.west, .rg.midwest { text-align: right; }
- 
+
 .region-cols { display: flex; gap: 2px; align-items: flex-start; }
 .region-cols.rev { flex-direction: row-reverse; }
- 
+
 /* ── Round columns ── */
 .rc { display: flex; flex-direction: column; flex-shrink: 0; }
 .rc-r64  { min-width: 148px; flex-grow: 148; gap: 7px; }
 .rc-r32  { min-width: 120px; flex-grow: 120; padding-top: 11.5px; }
 .rc-s16  { min-width: 104px; flex-grow: 104; padding-top: 37.5px; }
 .rc-e8   { min-width: 104px; flex-grow: 104; padding-top: 90px; }
- 
+
 /* ── Slot ── */
 .slot {
   height: 22px;
@@ -600,17 +198,17 @@ hr.div { border: none; border-top: 1px solid #eee; margin: 2px 0 8px; }
 .ub { font-size: 9px; font-weight: 700; flex-shrink: 0; line-height: 1; }
 .ub-seed  { color: #e05c29; margin-left: auto; }
 .ub-score { color: #2e6da4; margin-left: 2px; }
- 
+
 /* Matchup pair (R64) */
 .matchup     { display: flex; flex-direction: column; gap: 1px; border-right: 2px solid #e0dcd8; padding-right: 3px; }
 .matchup.rev { border-right: none; border-left: 2px solid #e0dcd8; padding-right: 0; padding-left: 3px; }
 /* Round pair connectors (R32 / S16 / E8) */
 .rc-pair     { display: flex; flex-direction: column; border-right: 2px solid #e0dcd8; padding-right: 3px; }
 .rc-pair.rev { border-right: none; border-left: 2px solid #e0dcd8; padding-right: 0; padding-left: 3px; }
- 
+
 /* Spacers between round slots */
 .sp { flex-shrink: 0; }
- 
+
 /* ── Center: Final Four ── */
 .center-ff {
   width: 120px;
@@ -629,7 +227,7 @@ hr.div { border: none; border-top: 1px solid #eee; margin: 2px 0 8px; }
   color: #b5872a; border: 1px solid #b5872a;
   padding: 2px 8px; border-radius: 2px; text-align: center; margin: 6px 0 2px;
 }
- 
+
 /* ── Tooltip ── */
 #tt {
   position: fixed;
@@ -663,21 +261,21 @@ hr.div { border: none; border-top: 1px solid #eee; margin: 2px 0 8px; }
 </style>
 </head>
 <body>
- 
+
 <div id="tt"></div>
- 
+
 <div class="topbar">
   <h1>March Madness 2026</h1>
   <span class="sub">Stats-Based Bracket Generator</span>
 </div>
- 
+
 <div class="app-body">
- 
+
   <!-- ── Sidebar ── -->
   <div class="sidebar">
     <div>
       <div class="sec-title">Stat Weights</div>
- 
+
       <div class="slider-block">
         <div class="slider-label-row">
           <span class="slider-name">Team Rating</span>
@@ -686,7 +284,7 @@ hr.div { border: none; border-top: 1px solid #eee; margin: 2px 0 8px; }
         <div class="slider-desc">Barthag + WAB + Strength of Schedule</div>
         <input type="range" id="sl-tr" min="0" max="10" value="8">
       </div>
- 
+
       <div class="slider-block">
         <div class="slider-label-row">
           <span class="slider-name">Offense</span>
@@ -695,7 +293,7 @@ hr.div { border: none; border-top: 1px solid #eee; margin: 2px 0 8px; }
         <div class="slider-desc">Adj. offensive efficiency + tempo</div>
         <input type="range" id="sl-off" min="0" max="10" value="5">
       </div>
- 
+
       <div class="slider-block">
         <div class="slider-label-row">
           <span class="slider-name">Defense</span>
@@ -704,9 +302,9 @@ hr.div { border: none; border-top: 1px solid #eee; margin: 2px 0 8px; }
         <div class="slider-desc">Adj. defensive efficiency (lower allowed = better)</div>
         <input type="range" id="sl-def" min="0" max="10" value="6">
       </div>
- 
+
       <hr class="div">
- 
+
       <div class="slider-block">
         <div class="slider-label-row">
           <span class="slider-name">Roster Height</span>
@@ -715,7 +313,7 @@ hr.div { border: none; border-top: 1px solid #eee; margin: 2px 0 8px; }
         <div class="slider-desc">Minutes-weighted avg height</div>
         <input type="range" id="sl-ht" min="0" max="10" value="4">
       </div>
- 
+
       <div class="slider-block">
         <div class="slider-label-row">
           <span class="slider-name">Momentum</span>
@@ -724,10 +322,10 @@ hr.div { border: none; border-top: 1px solid #eee; margin: 2px 0 8px; }
         <div class="slider-desc">Last-month performance entering tournament</div>
         <input type="range" id="sl-mo" min="0" max="10" value="3">
       </div>
- 
+
       <div class="weight-note">Sliders auto-normalize to 100%</div>
     </div>
- 
+
     <div>
       <div class="sec-title">Upset Factor</div>
       <div class="slider-block">
@@ -743,7 +341,7 @@ hr.div { border: none; border-top: 1px solid #eee; margin: 2px 0 8px; }
         1 vs 16: ~96% &nbsp;·&nbsp; 5 vs 12 (close): ~60%
       </div>
     </div>
- 
+
     <div>
       <button class="gen-btn" onclick="generate()">▶ Generate Bracket</button>
       <div class="gen-hint">Adjust settings and regenerate<br>to explore different outcomes.</div>
@@ -753,21 +351,21 @@ hr.div { border: none; border-top: 1px solid #eee; margin: 2px 0 8px; }
       </div>
     </div>
   </div>
- 
+
   <!-- ── Bracket area ── -->
   <div class="bracket-area">
     <div class="round-headers" id="rh"></div>
     <div class="bracket-wrap" id="bracket"></div>
   </div>
- 
+
 </div>
- 
+
 <script>
 // ═══════════════════════════════════════════════════════════════════════════
 // DATA
 // ═══════════════════════════════════════════════════════════════════════════
 const TEAMS = [{"region": "EAST", "seed": 1, "team": "Duke", "height": 79.33, "heightFmt": "6'7.3in", "momentum": 4.8, "barthag": 0.9815, "adjoe": 128.1069, "adjde": 90.709, "WAB": 13.6241, "adjt": 65.79, "sos": 0.7412, "record": "8-0"}, {"region": "EAST", "seed": 2, "team": "Connecticut", "height": 78.61, "heightFmt": "6'6.6in", "momentum": 3.9, "barthag": 0.9519, "adjoe": 123.0423, "adjde": 94.9111, "WAB": 8.8064, "adjt": 64.5704, "sos": 0.7141, "record": "5-3"}, {"region": "EAST", "seed": 3, "team": "Michigan State", "height": 78.26, "heightFmt": "6'6.3in", "momentum": 4.5, "barthag": 0.9442, "adjoe": 122.8702, "adjde": 96.079, "WAB": 7.4238, "adjt": 65.9666, "sos": 0.7471, "record": "4-2"}, {"region": "EAST", "seed": 4, "team": "Kansas", "height": 78.5, "heightFmt": "6'6.5in", "momentum": 3.5, "barthag": 0.9279, "adjoe": 117.7193, "adjde": 94.267, "WAB": 6.2141, "adjt": 67.5908, "sos": 0.7867, "record": "4-4"}, {"region": "EAST", "seed": 5, "team": "St. John's", "height": 78.21, "heightFmt": "6'6.2in", "momentum": 4.3, "barthag": 0.9417, "adjoe": 119.697, "adjde": 93.9794, "WAB": 7.2027, "adjt": 69.5904, "sos": 0.7292, "record": "8-1"}, {"region": "EAST", "seed": 6, "team": "Louisville", "height": 78.38, "heightFmt": "6'6.4in", "momentum": 4.4, "barthag": 0.9366, "adjoe": 123.9698, "adjde": 98.0931, "WAB": 3.9475, "adjt": 69.6994, "sos": 0.7083, "record": "4-3"}, {"region": "EAST", "seed": 7, "team": "UCLA", "height": 78.0, "heightFmt": "6'6.0in", "momentum": 4.7, "barthag": 0.9113, "adjoe": 124.5184, "adjde": 101.6839, "WAB": 3.5949, "adjt": 64.6729, "sos": 0.7139, "record": "6-2"}, {"region": "EAST", "seed": 8, "team": "Ohio State", "height": 77.7, "heightFmt": "6'5.7in", "momentum": 4.5, "barthag": 0.9178, "adjoe": 125.1403, "adjde": 101.4604, "WAB": 2.8686, "adjt": 66.1463, "sos": 0.7276, "record": "4-3"}, {"region": "EAST", "seed": 9, "team": "TCU", "height": 76.47, "heightFmt": "6'4.5in", "momentum": 4.5, "barthag": 0.8368, "adjoe": 114.7517, "adjde": 99.5442, "WAB": 2.3241, "adjt": 67.5558, "sos": 0.6722, "record": "6-1"}, {"region": "EAST", "seed": 10, "team": "UCF", "height": 78.75, "heightFmt": "6'6.7in", "momentum": 3.3, "barthag": 0.8116, "adjoe": 119.9046, "adjde": 105.6064, "WAB": 2.0696, "adjt": 69.0947, "sos": 0.7096, "record": "3-4"}, {"region": "EAST", "seed": 11, "team": "South Florida", "height": 77.08, "heightFmt": "6'5.1in", "momentum": 4.6, "barthag": 0.8363, "adjoe": 116.7097, "adjde": 101.2787, "WAB": -0.2882, "adjt": 71.3576, "sos": 0.5483, "record": "7-0"}, {"region": "EAST", "seed": 12, "team": "Northern Iowa", "height": 77.57, "heightFmt": "6'5.6in", "momentum": 3.8, "barthag": 0.7756, "adjoe": 109.7132, "adjde": 98.4958, "WAB": -5.34, "adjt": 62.1616, "sos": 0.507, "record": "6-2"}, {"region": "EAST", "seed": 13, "team": "Cal Baptist", "height": 76.62, "heightFmt": "6'4.6in", "momentum": 3.8, "barthag": 0.6889, "adjoe": 107.4065, "adjde": 100.2332, "WAB": -2.3517, "adjt": 65.9145, "sos": 0.4518, "record": "6-1"}, {"region": "EAST", "seed": 14, "team": "North Dakota St.", "height": 76.17, "heightFmt": "6'4.2in", "momentum": 3.4, "barthag": 0.6363, "adjoe": 111.2963, "adjde": 106.0108, "WAB": -3.4136, "adjt": 66.3414, "sos": 0.339, "record": "6-1"}, {"region": "EAST", "seed": 15, "team": "Furman", "height": 79.22, "heightFmt": "6'7.2in", "momentum": 2.4, "barthag": 0.4435, "adjoe": 106.8257, "adjde": 108.9545, "WAB": -8.7566, "adjt": 65.8268, "sos": 0.3175, "record": "5-2"}, {"region": "EAST", "seed": 16, "team": "Siena", "height": 76.7, "heightFmt": "6'4.7in", "momentum": 2.8, "barthag": 0.4521, "adjoe": 107.0489, "adjde": 108.8536, "WAB": -7.8199, "adjt": 64.6161, "sos": 0.2952, "record": "5-2"}, {"region": "WEST", "seed": 1, "team": "Arizona", "height": 78.95, "heightFmt": "6'7.0in", "momentum": 4.8, "barthag": 0.9777, "adjoe": 126.8361, "adjde": 91.2904, "WAB": 13.6094, "adjt": 70.0133, "sos": 0.7383, "record": "9-0"}, {"region": "WEST", "seed": 2, "team": "Purdue", "height": 77.74, "heightFmt": "6'5.7in", "momentum": 4.7, "barthag": 0.9639, "adjoe": 133.2645, "adjde": 100.1445, "WAB": 9.1523, "adjt": 64.424, "sos": 0.7796, "record": "6-3"}, {"region": "WEST", "seed": 3, "team": "Gonzaga", "height": 77.92, "heightFmt": "6'5.9in", "momentum": 4.6, "barthag": 0.9452, "adjoe": 120.2982, "adjde": 93.9059, "WAB": 7.3618, "adjt": 68.9179, "sos": 0.6285, "record": "5-1"}, {"region": "WEST", "seed": 4, "team": "Arkansas", "height": 78.5, "heightFmt": "6'6.5in", "momentum": 4.5, "barthag": 0.934, "adjoe": 127.8723, "adjde": 101.5503, "WAB": 7.4847, "adjt": 70.9634, "sos": 0.7461, "record": "7-2"}, {"region": "WEST", "seed": 5, "team": "Wisconsin", "height": 78.79, "heightFmt": "6'6.8in", "momentum": 4.6, "barthag": 0.93, "adjoe": 127.1326, "adjde": 101.531, "WAB": 5.3548, "adjt": 68.6801, "sos": 0.735, "record": "6-2"}, {"region": "WEST", "seed": 6, "team": "BYU", "height": 78.32, "heightFmt": "6'6.3in", "momentum": 3.8, "barthag": 0.8869, "adjoe": 124.6679, "adjde": 104.2255, "WAB": 4.4981, "adjt": 69.763, "sos": 0.7484, "record": "4-5"}, {"region": "WEST", "seed": 7, "team": "Miami", "height": 77.62, "heightFmt": "6'5.6in", "momentum": 4.3, "barthag": 0.8848, "adjoe": 121.0237, "adjde": 101.3648, "WAB": 3.8008, "adjt": 67.9157, "sos": 0.6396, "record": "4-3"}, {"region": "WEST", "seed": 8, "team": "Villanova", "height": 77.57, "heightFmt": "6'5.6in", "momentum": 3.4, "barthag": 0.8806, "adjoe": 119.5043, "adjde": 100.4476, "WAB": 3.9008, "adjt": 64.9323, "sos": 0.707, "record": "3-3"}, {"region": "WEST", "seed": 9, "team": "Utah State", "height": 77.66, "heightFmt": "6'5.7in", "momentum": 4.0, "barthag": 0.897, "adjoe": 123.0671, "adjde": 101.953, "WAB": 4.0401, "adjt": 67.5217, "sos": 0.6429, "record": "6-3"}, {"region": "WEST", "seed": 10, "team": "Missouri", "height": 77.21, "heightFmt": "6'5.2in", "momentum": 4.0, "barthag": 0.852, "adjoe": 119.8818, "adjde": 102.9557, "WAB": 1.1212, "adjt": 66.3667, "sos": 0.6772, "record": "3-4"}, {"region": "WEST", "seed": 11, "team": "Texas", "height": 77.34, "heightFmt": "6'5.3in", "momentum": 3.6, "barthag": 0.8576, "adjoe": 123.202, "adjde": 105.3919, "WAB": -0.2596, "adjt": 67.0212, "sos": 0.6772, "record": "2-5"}, {"region": "WEST", "seed": 12, "team": "High Point", "height": 76.45, "heightFmt": "6'4.5in", "momentum": 3.5, "barthag": 0.6989, "adjoe": 115.5875, "adjde": 107.4269, "WAB": -1.4526, "adjt": 69.8759, "sos": 0.2783, "record": "6-0"}, {"region": "WEST", "seed": 13, "team": "Hawaii", "height": 78.65, "heightFmt": "6'6.6in", "momentum": 2.9, "barthag": 0.6303, "adjoe": 106.6847, "adjde": 101.8477, "WAB": -3.8399, "adjt": 69.5614, "sos": 0.3978, "record": "6-2"}, {"region": "WEST", "seed": 14, "team": "Kennesaw St.", "height": 78.28, "heightFmt": "6'6.3in", "momentum": 3.1, "barthag": 0.5395, "adjoe": 110.8236, "adjde": 109.3101, "WAB": -7.9206, "adjt": 71.2528, "sos": 0.4262, "record": "7-2"}, {"region": "WEST", "seed": 15, "team": "Queens", "height": 78.19, "heightFmt": "6'6.2in", "momentum": 2.7, "barthag": 0.4392, "adjoe": 114.5891, "adjde": 117.0489, "WAB": -7.007, "adjt": 69.4898, "sos": 0.3826, "record": "6-1"}, {"region": "WEST", "seed": 16, "team": "Long Island", "height": 77.49, "heightFmt": "6'5.5in", "momentum": 1.6, "barthag": 0.3389, "adjoe": 103.5362, "adjde": 109.7318, "WAB": -5.7958, "adjt": 67.8151, "sos": 0.3029, "record": "6-1"}, {"region": "MIDWEST", "seed": 1, "team": "Michigan", "height": 77.43, "heightFmt": "6'5.4in", "momentum": 4.8, "barthag": 0.9801, "adjoe": 127.589, "adjde": 90.9227, "WAB": 13.9632, "adjt": 71.2035, "sos": 0.8033, "record": "6-2"}, {"region": "MIDWEST", "seed": 2, "team": "Iowa State", "height": 78.03, "heightFmt": "6'6.0in", "momentum": 4.5, "barthag": 0.9657, "adjoe": 123.6661, "adjde": 92.5237, "WAB": 7.3422, "adjt": 66.941, "sos": 0.6966, "record": "4-4"}, {"region": "MIDWEST", "seed": 3, "team": "Virginia", "height": 78.21, "heightFmt": "6'6.2in", "momentum": 4.5, "barthag": 0.9428, "adjoe": 122.2707, "adjde": 95.8271, "WAB": 7.7055, "adjt": 65.5696, "sos": 0.6764, "record": "7-2"}, {"region": "MIDWEST", "seed": 4, "team": "Alabama", "height": 77.55, "heightFmt": "6'5.6in", "momentum": 4.3, "barthag": 0.9346, "adjoe": 129.4683, "adjde": 102.7316, "WAB": 6.5071, "adjt": 73.0443, "sos": 0.7895, "record": "5-2"}, {"region": "MIDWEST", "seed": 5, "team": "Texas Tech", "height": 77.1, "heightFmt": "6'5.1in", "momentum": 4.2, "barthag": 0.9441, "adjoe": 126.24, "adjde": 98.7363, "WAB": 5.0202, "adjt": 66.3822, "sos": 0.7601, "record": "3-3"}, {"region": "MIDWEST", "seed": 6, "team": "Tennessee", "height": 76.74, "heightFmt": "6'4.7in", "momentum": 4.5, "barthag": 0.941, "adjoe": 121.4065, "adjde": 95.4252, "WAB": 4.0598, "adjt": 65.2135, "sos": 0.7317, "record": "4-4"}, {"region": "MIDWEST", "seed": 7, "team": "Kentucky", "height": 76.16, "heightFmt": "6'4.2in", "momentum": 4.3, "barthag": 0.8904, "adjoe": 119.8435, "adjde": 99.8822, "WAB": 3.2548, "adjt": 68.3064, "sos": 0.7364, "record": "4-4"}, {"region": "MIDWEST", "seed": 8, "team": "Georgia", "height": 77.41, "heightFmt": "6'5.4in", "momentum": 4.1, "barthag": 0.8784, "adjoe": 124.3633, "adjde": 104.7174, "WAB": 2.5647, "adjt": 72.0148, "sos": 0.6705, "record": "4-2"}, {"region": "MIDWEST", "seed": 9, "team": "Saint Louis", "height": 77.58, "heightFmt": "6'5.6in", "momentum": 3.0, "barthag": 0.8561, "adjoe": 119.3553, "adjde": 102.2113, "WAB": 1.8066, "adjt": 70.9974, "sos": 0.515, "record": "4-3"}, {"region": "MIDWEST", "seed": 10, "team": "Santa Clara", "height": 78.49, "heightFmt": "6'6.5in", "momentum": 4.4, "barthag": 0.8958, "adjoe": 124.9779, "adjde": 103.6535, "WAB": 2.1326, "adjt": 69.245, "sos": 0.6132, "record": "4-2"}, {"region": "MIDWEST", "seed": 11, "team": "Miami-OH", "height": 77.62, "heightFmt": "6'5.6in", "momentum": 3.1, "barthag": 0.7176, "adjoe": 116.5894, "adjde": 107.5084, "WAB": 2.4342, "adjt": 69.9269, "sos": 0.3452, "record": "5-1"}, {"region": "MIDWEST", "seed": 12, "team": "Akron", "height": 76.1, "heightFmt": "6'4.1in", "momentum": 3.7, "barthag": 0.7725, "adjoe": 117.1411, "adjde": 105.3273, "WAB": -0.2289, "adjt": 70.3017, "sos": 0.3937, "record": "8-0"}, {"region": "MIDWEST", "seed": 13, "team": "Hofstra", "height": 77.39, "heightFmt": "6'5.4in", "momentum": 3.7, "barthag": 0.706, "adjoe": 113.08, "adjde": 104.785, "WAB": -4.7045, "adjt": 64.6994, "sos": 0.4302, "record": "7-0"}, {"region": "MIDWEST", "seed": 14, "team": "Wright St.", "height": 77.05, "heightFmt": "6'5.0in", "momentum": 2.6, "barthag": 0.5852, "adjoe": 112.2475, "adjde": 108.9366, "WAB": -6.5972, "adjt": 66.9619, "sos": 0.3961, "record": "6-1"}, {"region": "MIDWEST", "seed": 15, "team": "Tennessee St.", "height": 76.74, "heightFmt": "6'4.7in", "momentum": 3.9, "barthag": 0.3955, "adjoe": 107.6959, "adjde": 111.7426, "WAB": -5.6522, "adjt": 70.121, "sos": 0.2714, "record": "6-0"}, {"region": "MIDWEST", "seed": 16, "team": "Howard", "height": 76.2, "heightFmt": "6'4.2in", "momentum": 2.5, "barthag": 0.4396, "adjoe": 104.4234, "adjde": 106.6532, "WAB": -6.8737, "adjt": 69.0648, "sos": 0.2249, "record": "7-0"}, {"region": "SOUTH", "seed": 1, "team": "Florida", "height": 77.5, "heightFmt": "6'5.5in", "momentum": 4.6, "barthag": 0.9733, "adjoe": 126.027, "adjde": 92.1971, "WAB": 8.4833, "adjt": 70.3858, "sos": 0.7578, "record": "6-1"}, {"region": "SOUTH", "seed": 2, "team": "Houston", "height": 76.57, "heightFmt": "6'4.6in", "momentum": 4.6, "barthag": 0.971, "adjoe": 125.2309, "adjde": 92.2946, "WAB": 8.9372, "adjt": 63.3096, "sos": 0.7307, "record": "5-3"}, {"region": "SOUTH", "seed": 3, "team": "Illinois", "height": 76.6, "heightFmt": "6'4.6in", "momentum": 4.6, "barthag": 0.9678, "adjoe": 131.8906, "adjde": 98.109, "WAB": 6.5425, "adjt": 65.7038, "sos": 0.739, "record": "3-3"}, {"region": "SOUTH", "seed": 4, "team": "Nebraska", "height": 77.82, "heightFmt": "6'5.8in", "momentum": 3.8, "barthag": 0.9312, "adjoe": 117.1301, "adjde": 93.3856, "WAB": 7.444, "adjt": 66.8067, "sos": 0.6957, "record": "4-2"}, {"region": "SOUTH", "seed": 5, "team": "Vanderbilt", "height": 77.26, "heightFmt": "6'5.3in", "momentum": 4.3, "barthag": 0.9463, "adjoe": 127.4065, "adjde": 99.2805, "WAB": 7.2527, "adjt": 68.9701, "sos": 0.738, "record": "5-4"}, {"region": "SOUTH", "seed": 6, "team": "North Carolina", "height": 77.95, "heightFmt": "6'6.0in", "momentum": 4.4, "barthag": 0.9031, "adjoe": 121.307, "adjde": 99.9096, "WAB": 4.8716, "adjt": 67.9729, "sos": 0.7025, "record": "4-2"}, {"region": "SOUTH", "seed": 7, "team": "Saint Mary's", "height": 78.74, "heightFmt": "6'6.7in", "momentum": 4.6, "barthag": 0.9115, "adjoe": 119.3819, "adjde": 97.4672, "WAB": 4.0069, "adjt": 65.275, "sos": 0.6013, "record": "4-1"}, {"region": "SOUTH", "seed": 8, "team": "Clemson", "height": 77.96, "heightFmt": "6'6.0in", "momentum": 4.0, "barthag": 0.892, "adjoe": 116.4958, "adjde": 96.9521, "WAB": 3.1209, "adjt": 64.2595, "sos": 0.6819, "record": "4-4"}, {"region": "SOUTH", "seed": 9, "team": "Iowa", "height": 78.49, "heightFmt": "6'6.5in", "momentum": 4.3, "barthag": 0.9074, "adjoe": 122.0601, "adjde": 100.0919, "WAB": 1.9342, "adjt": 63.0131, "sos": 0.6922, "record": "2-5"}, {"region": "SOUTH", "seed": 10, "team": "Texas A&M", "height": 77.34, "heightFmt": "6'5.3in", "momentum": 3.5, "barthag": 0.8721, "adjoe": 119.806, "adjde": 101.3842, "WAB": 1.5561, "adjt": 71.0021, "sos": 0.6736, "record": "4-3"}, {"region": "SOUTH", "seed": 11, "team": "VCU", "height": 77.88, "heightFmt": "6'5.9in", "momentum": 4.3, "barthag": 0.8426, "adjoe": 119.1604, "adjde": 102.9848, "WAB": 1.6244, "adjt": 68.6661, "sos": 0.5633, "record": "6-1"}, {"region": "SOUTH", "seed": 12, "team": "McNeese", "height": 77.08, "heightFmt": "6'5.1in", "momentum": 4.1, "barthag": 0.7671, "adjoe": 113.124, "adjde": 101.9842, "WAB": 0.7059, "adjt": 66.1157, "sos": 0.4257, "record": "6-0"}, {"region": "SOUTH", "seed": 13, "team": "Troy", "height": 77.34, "heightFmt": "6'5.3in", "momentum": 2.8, "barthag": 0.5462, "adjoe": 110.6268, "adjde": 108.8599, "WAB": -6.1434, "adjt": 65.0715, "sos": 0.4053, "record": "5-1"}, {"region": "SOUTH", "seed": 14, "team": "Penn", "height": 78.85, "heightFmt": "6'6.9in", "momentum": 3.2, "barthag": 0.5284, "adjoe": 106.4416, "adjde": 105.3923, "WAB": -6.0835, "adjt": 69.0029, "sos": 0.4608, "record": "5-1"}, {"region": "SOUTH", "seed": 15, "team": "Idaho", "height": 77.55, "heightFmt": "6'5.5in", "momentum": 3.4, "barthag": 0.5699, "adjoe": 108.7145, "adjde": 106.0877, "WAB": -8.9131, "adjt": 67.4106, "sos": 0.4243, "record": "7-2"}, {"region": "SOUTH", "seed": 16, "team": "Prairie View", "height": 76.63, "heightFmt": "6'4.6in", "momentum": 2.6, "barthag": 0.2555, "adjoe": 101.3827, "adjde": 111.264, "WAB": -12.5805, "adjt": 70.8393, "sos": 0.2963, "record": "8-1"}];
- 
+
 // ═══════════════════════════════════════════════════════════════════════════
 // BRACKET STRUCTURE
 // ═══════════════════════════════════════════════════════════════════════════
@@ -775,20 +373,20 @@ const TEAMS = [{"region": "EAST", "seed": 1, "team": "Duke", "height": 79.33, "h
 const SEED_PAIRS  = [[1,16],[8,9],[5,12],[4,13],[6,11],[3,14],[7,10],[2,15]];
 const R32_MATCHES = [[0,1],[2,3],[4,5],[6,7]]; // which R64 pairs meet in R32
 const S16_MATCHES = [[0,1],[2,3]];             // which R32 games meet in S16
- 
+
 // Layout constants (px)
 const SH = 22;   // slot height
 const IG = 1;    // inner gap (within R64 matchup pair)
 const PG = 7;    // pair gap (between R64 matchup pairs)
 const PP = SH*2 + IG + PG; // pair period = 52px
- 
+
 // Round column spacings [paddingTop, gapBetweenSlots]
 const SPACING = {
   r32: [11.5, 30],
   s16: [37.5, 82],
   e8:  [90,  186],
 };
- 
+
 // ═══════════════════════════════════════════════════════════════════════════
 // NORMALIZATION
 // ═══════════════════════════════════════════════════════════════════════════
@@ -801,14 +399,14 @@ function buildNorms(teams) {
   }
   return norms;
 }
- 
+
 function norm(val, n, invert = false) {
   if (val === null || val === undefined || isNaN(val)) return 0; // NaN → worst
   const range = n.max - n.min;
   const r = range === 0 ? 0.5 : (val - n.min) / range;
   return invert ? 1 - r : r;
 }
- 
+
 // ═══════════════════════════════════════════════════════════════════════════
 // SCORING
 // ═══════════════════════════════════════════════════════════════════════════
@@ -824,23 +422,23 @@ function score(team, w, norms) {
   const defense   = norm(team.adjde, norms.adjde, true);
   const height    = norm(team.height,   norms.height);
   const momentum  = norm(team.momentum, norms.momentum);
- 
+
   const total = w.tr + w.off + w.def + w.ht + w.mo;
   const composite = total === 0 ? 0.5
     : (w.tr * teamRating + w.off * offense + w.def * defense + w.ht * height + w.mo * momentum) / total;
- 
+
   return { composite, teamRating, offense, defense, height, momentum };
 }
- 
+
 // ═══════════════════════════════════════════════════════════════════════════
 // SIMULATION
 // ═══════════════════════════════════════════════════════════════════════════
 function getK(factor) {
   return 20 * Math.pow(0.081, factor / 10);
 }
- 
+
 function sigmoid(x) { return 1 / (1 + Math.exp(-x)); }
- 
+
 function matchup(tA, tB, w, norms, factor) {
   const sA = score(tA, w, norms);
   const sB = score(tB, w, norms);
@@ -858,17 +456,17 @@ function matchup(tA, tB, w, norms, factor) {
     isScoreUpset: aWins ? sA.composite < sB.composite : sB.composite < sA.composite,
   };
 }
- 
+
 function runBracket(teams, w, factor) {
   const norms = buildNorms(teams);
- 
+
   // Index by region → seed
   const idx = {};
   for (const t of teams) {
     if (!idx[t.region]) idx[t.region] = {};
     idx[t.region][t.seed] = t;
   }
- 
+
   const reg = {};
   for (const region of ['EAST','WEST','SOUTH','MIDWEST']) {
     const rs = idx[region];
@@ -878,19 +476,19 @@ function runBracket(teams, w, factor) {
     const e8  = [matchup(s16[0].winner, s16[1].winner, w, norms, factor)];
     reg[region] = { r64, r32, s16, e8 };
   }
- 
+
   const ff1  = matchup(reg.EAST.e8[0].winner, reg.SOUTH.e8[0].winner, w, norms, factor);
   const ff2  = matchup(reg.WEST.e8[0].winner, reg.MIDWEST.e8[0].winner, w, norms, factor);
   const champ = matchup(ff1.winner, ff2.winner, w, norms, factor);
- 
+
   return { reg, ff1, ff2, champ, norms };
 }
- 
+
 // ═══════════════════════════════════════════════════════════════════════════
 // TOOLTIP
 // ═══════════════════════════════════════════════════════════════════════════
 const TT = document.getElementById('tt');
- 
+
 const COMPONENT_COLORS = {
   teamRating: '#e05c29',
   offense:    '#5b85a8',
@@ -905,7 +503,7 @@ const COMPONENT_LABELS = {
   height:     'Height',
   momentum:   'Momentum',
 };
- 
+
 function attachTooltip(el, team, sc) {
   el.addEventListener('mouseenter', (e) => {
     const pct = (sc.composite * 100).toFixed(1);
@@ -914,7 +512,7 @@ function attachTooltip(el, team, sc) {
       <div class="tt-meta">${team.region} · #${team.seed} Seed${team.record ? ' · ' + team.record : ''}</div>
       <div class="tt-composite">Composite Score: ${pct}</div>
       <div class="tt-composite-bar-bg"><div class="tt-composite-bar" style="width:${pct}%"></div></div>`;
- 
+
     for (const [key, label] of Object.entries(COMPONENT_LABELS)) {
       const v = sc[key];
       const color = COMPONENT_COLORS[key];
@@ -924,7 +522,7 @@ function attachTooltip(el, team, sc) {
         <span class="tt-val">${(v*100).toFixed(0)}%</span>
       </div>`;
     }
- 
+
     html += `<div class="tt-div"></div>`;
     const stats = [
       ['Barthag', team.barthag?.toFixed(3)],
@@ -939,16 +537,16 @@ function attachTooltip(el, team, sc) {
         html += `<div class="tt-stat">${l}: <span>${v}</span></div>`;
       }
     }
- 
+
     TT.innerHTML = html;
     TT.style.display = 'block';
     positionTT(e);
   });
- 
+
   el.addEventListener('mousemove', positionTT);
   el.addEventListener('mouseleave', () => { TT.style.display = 'none'; });
 }
- 
+
 function positionTT(e) {
   const x = e.clientX + 14;
   const y = e.clientY - 10;
@@ -957,7 +555,7 @@ function positionTT(e) {
   TT.style.left = (x + tw > window.innerWidth  ? x - tw - 28 : x) + 'px';
   TT.style.top  = (y + th > window.innerHeight ? y - th + 20 : y) + 'px';
 }
- 
+
 // ═══════════════════════════════════════════════════════════════════════════
 // RENDERING
 // ═══════════════════════════════════════════════════════════════════════════
@@ -988,40 +586,40 @@ function makeSlot(team, sc, cssClass, seedUpset, scoreUpset, isWinner=false) {
   attachTooltip(el, team, sc);
   return el;
 }
- 
+
 function makePendingSlot() {
   const el = document.createElement('div');
   el.className = 'slot pending';
   el.textContent = 'TBD';
   return el;
 }
- 
+
 function makeR64Col(region, r64, reversed) {
   const col = document.createElement('div');
   col.className = 'rc rc-r64';
- 
+
   SEED_PAIRS.forEach(([s1, s2], i) => {
     const game = r64[i];
     const matchupEl = document.createElement('div');
     matchupEl.className = 'matchup' + (reversed ? ' rev' : '');
- 
+
     const tA = game.winner.seed === s1 ? game.winner : game.loser;
     const tB = game.winner.seed === s2 ? game.winner : game.loser;
     const sA = game.winner.seed === s1 ? game.winnerScore : game.loserScore;
     const sB = game.winner.seed === s2 ? game.winnerScore : game.loserScore;
- 
+
     matchupEl.appendChild(makeSlot(tA, sA, '', tA === game.winner && game.isUpset, tA === game.winner && game.isScoreUpset, tA === game.winner));
     matchupEl.appendChild(makeSlot(tB, sB, '', tB === game.winner && game.isUpset, tB === game.winner && game.isScoreUpset, tB === game.winner));
     col.appendChild(matchupEl);
   });
   return col;
 }
- 
+
 function makeRoundCol(games, cssClass, paddingTop, gapBetween, reversed, nextRound) {
   const col = document.createElement('div');
   col.className = 'rc ' + cssClass;
   col.style.paddingTop = paddingTop + 'px';
- 
+
   for (let i = 0; i < games.length; i += 2) {
     if (i > 0) {
       const sp = document.createElement('div');
@@ -1046,24 +644,24 @@ function makeRoundCol(games, cssClass, paddingTop, gapBetween, reversed, nextRou
   }
   return col;
 }
- 
+
 function renderRegion(region, res, reversed) {
   const wrapper = document.createElement('div');
   wrapper.className = 'region-wrap';
- 
+
   const label = document.createElement('div');
   label.className = 'rg ' + region.toLowerCase();
   label.textContent = region.charAt(0).toUpperCase() + region.slice(1).toLowerCase();
   wrapper.appendChild(label);
- 
+
   const cols = document.createElement('div');
   cols.className = 'region-cols' + (reversed ? ' rev' : '');
- 
+
   const { r64, r32, s16, e8 } = res;
- 
+
   // R64 column
   cols.appendChild(makeR64Col(region, r64, reversed));
- 
+
   // R32: 8 slots in 4 pairs (each pair will meet in S16)
   const r32col = document.createElement('div');
   r32col.className = 'rc rc-r32';
@@ -1089,22 +687,22 @@ function renderRegion(region, res, reversed) {
     r32col.appendChild(pair);
   }
   cols.appendChild(r32col);
- 
+
   // S16: 4 slots in 2 pairs (each pair will meet in E8)
   cols.appendChild(makeRoundCol(r32, 'rc-s16', SPACING.s16[0], SPACING.s16[1], reversed, s16));
- 
+
   // E8: 2 slots as 1 pair (will meet in Final Four)
   cols.appendChild(makeRoundCol(s16, 'rc-e8', SPACING.e8[0], SPACING.e8[1], reversed, e8));
- 
+
   wrapper.appendChild(cols);
   return wrapper;
 }
- 
+
 function renderCenter(results) {
   const { ff1, ff2, champ } = results;
   const col = document.createElement('div');
   col.className = 'center-ff';
- 
+
   const addLabel = (txt, cls='ff-label') => {
     const el = document.createElement('div');
     el.className = cls;
@@ -1121,7 +719,7 @@ function renderCenter(results) {
     const sc    = which === 'a' ? game.scoreA : game.scoreB;
     col.appendChild(makeSlot(team, sc, 'ff', false, false, team === game.winner));
   };
- 
+
   addLabel('Final Four');
   addLabel('East vs South', 'ff-vs');
   addFFSlot(ff1, 'a');
@@ -1140,24 +738,24 @@ function renderCenter(results) {
   addFFSlot(ff2, 'a');
   addLabel('vs', 'ff-vs');
   addFFSlot(ff2, 'b');
- 
+
   return col;
 }
- 
+
 function renderBracket(results) {
   const wrap = document.getElementById('bracket');
   wrap.innerHTML = '';
- 
+
   // Left side: East (top) + South (bottom)
   const left = document.createElement('div');
   left.className = 'side';
   left.appendChild(renderRegion('EAST',  results.reg.EAST,    false));
   left.appendChild(renderRegion('SOUTH', results.reg.SOUTH,   false));
   wrap.appendChild(left);
- 
+
   // Center
   wrap.appendChild(renderCenter(results));
- 
+
   // Right side: West (top) + Midwest (bottom)
   const right = document.createElement('div');
   right.className = 'side';
@@ -1165,11 +763,11 @@ function renderBracket(results) {
   right.appendChild(renderRegion('MIDWEST', results.reg.MIDWEST, true));
   wrap.appendChild(right);
 }
- 
+
 function renderHeaders() {
   const rh = document.getElementById('rh');
   rh.innerHTML = '';
- 
+
   const makeGroup = (items) => {
     const g = document.createElement('div');
     g.className = 'rh-group';
@@ -1184,19 +782,19 @@ function renderHeaders() {
     });
     return g;
   };
- 
+
   rh.appendChild(makeGroup([['R64', 148], ['R32', 120], ['Sweet 16', 104], ['Elite 8', 104]]));
- 
+
   const center = document.createElement('div');
   center.className = 'rh';
   center.style.width = '120px';
   center.style.flexShrink = '0';
   center.textContent = 'Final Four';
   rh.appendChild(center);
- 
+
   rh.appendChild(makeGroup([['Elite 8', 104], ['Sweet 16', 104], ['R32', 120], ['R64', 148]]));
 }
- 
+
 // ═══════════════════════════════════════════════════════════════════════════
 // SLIDERS
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1209,7 +807,7 @@ function getWeights() {
     mo:  +document.getElementById('sl-mo').value,
   };
 }
- 
+
 function updatePcts() {
   const w = getWeights();
   const total = w.tr + w.off + w.def + w.ht + w.mo || 1;
@@ -1221,11 +819,11 @@ function updatePcts() {
   const uf = +document.getElementById('sl-uf').value;
   document.getElementById('pct-uf').textContent  = uf + ' / 10';
 }
- 
+
 ['sl-tr','sl-off','sl-def','sl-ht','sl-mo','sl-uf'].forEach(id => {
   document.getElementById(id).addEventListener('input', updatePcts);
 });
- 
+
 // ═══════════════════════════════════════════════════════════════════════════
 // GENERATE
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1235,7 +833,7 @@ function generate() {
   const results = runBracket(TEAMS, w, factor);
   renderBracket(results);
 }
- 
+
 // ─ Init ───────────────────────────────────────────────────────────────────
 renderHeaders();
 updatePcts();
@@ -1243,6 +841,3 @@ generate();
 </script>
 </body>
 </html>
- 
-
-
