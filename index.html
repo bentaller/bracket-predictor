@@ -608,8 +608,8 @@ function makeR64Col(region, r64, reversed) {
     const sA = game.winner.seed === s1 ? game.winnerScore : game.loserScore;
     const sB = game.winner.seed === s2 ? game.winnerScore : game.loserScore;
 
-    matchupEl.appendChild(makeSlot(tA, sA, '', false, false, tA === game.winner));
-    matchupEl.appendChild(makeSlot(tB, sB, '', false, false, tB === game.winner));
+    matchupEl.appendChild(makeSlot(tA, sA, '', tA === game.winner && game.isUpset, tA === game.winner && game.isScoreUpset, tA === game.winner));
+    matchupEl.appendChild(makeSlot(tB, sB, '', tB === game.winner && game.isUpset, tB === game.winner && game.isScoreUpset, tB === game.winner));
     col.appendChild(matchupEl);
   });
   return col;
@@ -630,14 +630,14 @@ function makeRoundCol(games, cssClass, paddingTop, gapBetween, reversed, nextRou
     const pair = document.createElement('div');
     pair.className = 'rc-pair' + (reversed ? ' rev' : '');
     const nextGame = nextRound[i / 2];
-    pair.appendChild(makeSlot(games[i].winner, games[i].winnerScore, 'w', games[i].isUpset, games[i].isScoreUpset,
+    pair.appendChild(makeSlot(games[i].winner, games[i].winnerScore, 'w', games[i].winner === nextGame.winner && nextGame.isUpset, games[i].winner === nextGame.winner && nextGame.isScoreUpset,
       games[i].winner === nextGame.winner));
     if (i + 1 < games.length) {
       const isp = document.createElement('div');
       isp.className = 'sp';
       isp.style.height = gapBetween + 'px';
       pair.appendChild(isp);
-      pair.appendChild(makeSlot(games[i+1].winner, games[i+1].winnerScore, 'w', games[i+1].isUpset, games[i+1].isScoreUpset,
+      pair.appendChild(makeSlot(games[i+1].winner, games[i+1].winnerScore, 'w', games[i+1].winner === nextGame.winner && nextGame.isUpset, games[i+1].winner === nextGame.winner && nextGame.isScoreUpset,
         games[i+1].winner === nextGame.winner));
     }
     col.appendChild(pair);
@@ -676,13 +676,13 @@ function renderRegion(region, res, reversed) {
     const pair = document.createElement('div');
     pair.className = 'rc-pair' + (reversed ? ' rev' : '');
     const r32game = r32[i / 2];
-    pair.appendChild(makeSlot(r64[i].winner, r64[i].winnerScore, 'w', r64[i].isUpset, r64[i].isScoreUpset,
+    pair.appendChild(makeSlot(r64[i].winner, r64[i].winnerScore, 'w', r64[i].winner === r32game.winner && r32game.isUpset, r64[i].winner === r32game.winner && r32game.isScoreUpset,
       r64[i].winner === r32game.winner));
     const isp = document.createElement('div');
     isp.className = 'sp';
     isp.style.height = SPACING.r32[1] + 'px';
     pair.appendChild(isp);
-    pair.appendChild(makeSlot(r64[i+1].winner, r64[i+1].winnerScore, 'w', r64[i+1].isUpset, r64[i+1].isScoreUpset,
+    pair.appendChild(makeSlot(r64[i+1].winner, r64[i+1].winnerScore, 'w', r64[i+1].winner === r32game.winner && r32game.isUpset, r64[i+1].winner === r32game.winner && r32game.isScoreUpset,
       r64[i+1].winner === r32game.winner));
     r32col.appendChild(pair);
   }
